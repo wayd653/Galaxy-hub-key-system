@@ -1,0 +1,283 @@
+--[[  Galaxy Hub – Secure Key GUI (single file)
+      - Owner permanent key (OWNER_KEY)
+      - Talks to Vercel backend (/api/validate)
+      - Mild obfuscation for API URL pieces
+      - Spinner + status + "Get Key" + "Discord"
+      - One file; paste into a LocalScript (StarterPlayerScripts)
+--]]
+
+-- ========== CONFIG YOU EDIT ==========
+local PROJECT     = "your-vercel-project"    -- <- your Vercel subdomain (no https, no /api)
+local OWNER_KEY   = "OWNER-GALAXY-HUB-999"   -- <- your permanent owner key (also set as OWNER_KEY env var on Vercel!)
+local KEY_PAGE_URL= "https://discord.gg/HHxBpxq39N" -- <- or your linkvertise/lootlabs page
+local DISCORD_URL = "https://discord.gg/HHxBpxq39N"
+local HUB_URL     = "https://pastefy.app/NC7i0OB9/raw" -- your hub loader
+-- =====================================
+
+-- Mild string hiding helpers
+local function bytesToStr(t) local b = {}; for i=1,#t do b[i] = string.char(t[i]) end; return table.concat(b) end
+local HTTPS   = bytesToStr{104,116,116,112,115,58,47,47}                -- "https://"
+local DOT     = bytesToStr{46}                                          -- "."
+local API     = bytesToStr{47,97,112,105}                                -- "/api"
+local VERCEL  = bytesToStr{118,101,114,99,101,108,46,97,112,112}        -- "vercel.app"
+
+-- Services
+local Players         = game:GetService("Players")
+local TweenService    = game:GetService("TweenService")
+local UserInputService= game:GetService("UserInputService")
+local HttpService     = game:GetService("HttpService")
+
+local LocalPlayer     = Players.LocalPlayer
+local PlayerGui       = LocalPlayer:WaitForChild("PlayerGui")
+
+-- Build API base
+local BASE = HTTPS .. PROJECT .. DOT .. VERCEL .. API   -- https://your-vercel-project.vercel.app/api
+
+-- Simple request helper
+local function httpGet(url)
+    return pcall(function() return game:HttpGet(url) end)
+end
+
+-- ========== UI ==========
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "GalaxyHubKeyUI"
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = PlayerGui
+
+local Backdrop = Instance.new("Frame")
+Backdrop.BackgroundColor3 = Color3.fromRGB(0,0,0)
+Backdrop.BackgroundTransparency = 0.25
+Backdrop.Size = UDim2.new(1,0,1,0)
+Backdrop.Parent = ScreenGui
+
+local Container = Instance.new("Frame")
+Container.Size = UDim2.new(0, 420, 0, 280)
+Container.Position = UDim2.new(0.5, -210, 0.5, -140)
+Container.BackgroundColor3 = Color3.fromRGB(22,22,26)
+Container.Parent = ScreenGui
+local cCorner = Instance.new("UICorner", Container) cCorner.CornerRadius = UDim.new(0,14)
+local cStroke = Instance.new("UIStroke", Container) cStroke.Thickness=1 cStroke.Color=Color3.fromRGB(45,45,55) cStroke.Transparency = 0.2
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -32, 0, 32)
+Title.Position = UDim2.new(0,16,0,14)
+Title.BackgroundTransparency = 1
+Title.Text = "Galaxy Hub — Access Key"
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 20
+Title.TextColor3 = Color3.fromRGB(230,230,235)
+Title.Parent = Container
+
+local Sub = Instance.new("TextLabel")
+Sub.Size = UDim2.new(1, -32, 0, 24)
+Sub.Position = UDim2.new(0,16,0,44)
+Sub.BackgroundTransparency = 1
+Sub.Text = "Enter your key to continue"
+Sub.Font = Enum.Font.Gotham
+Sub.TextSize = 14
+Sub.TextColor3 = Color3.fromRGB(150,150,160)
+Sub.Parent = Container
+
+local InputBox = Instance.new("TextBox")
+InputBox.Size = UDim2.new(1, -32, 0, 44)
+InputBox.Position = UDim2.new(0,16,0,80)
+InputBox.BackgroundColor3 = Color3.fromRGB(30,30,36)
+InputBox.PlaceholderText = "Paste key here"
+InputBox.Text = ""
+InputBox.ClearTextOnFocus = false
+InputBox.TextXAlignment = Enum.TextXAlignment.Left
+InputBox.Font = Enum.Font.Gotham
+InputBox.TextSize = 16
+InputBox.TextColor3 = Color3.fromRGB(230,230,235)
+InputBox.Parent = Container
+local iCorner = Instance.new("UICorner", InputBox) iCorner.CornerRadius = UDim.new(0,10)
+local iStroke = Instance.new("UIStroke", InputBox) iStroke.Thickness=1 iStroke.Color=Color3.fromRGB(45,45,55) iStroke.Transparency=0.25
+local Pad = Instance.new("UIPadding", InputBox) Pad.PaddingLeft = UDim.new(0,12); Pad.PaddingRight = UDim.new(0,12)
+
+local Status = Instance.new("TextLabel")
+Status.Size = UDim2.new(1, -32, 0, 22)
+Status.Position = UDim2.new(0,16,0,132)
+Status.BackgroundTransparency = 1
+Status.Font = Enum.Font.Gotham
+Status.TextSize = 13
+Status.TextColor3 = Color3.fromRGB(200,80,80)
+Status.Text = ""
+Status.Parent = Container
+
+local Verify = Instance.new("TextButton")
+Verify.Size = UDim2.new(1, -32, 0, 44)
+Verify.Position = UDim2.new(0,16,0,164)
+Verify.BackgroundColor3 = Color3.fromRGB(50,50,60)
+Verify.AutoButtonColor = false
+Verify.Font = Enum.Font.GothamMedium
+Verify.TextSize = 16
+Verify.TextColor3 = Color3.fromRGB(235,235,240)
+Verify.Text = "Verify Key"
+Verify.Parent = Container
+local vCorner = Instance.new("UICorner", Verify) vCorner.CornerRadius = UDim.new(0,10)
+
+local Spinner = Instance.new("Frame")
+Spinner.Size = UDim2.new(0, 20, 0, 20)
+Spinner.Position = UDim2.new(0.5, -10, 0.5, -10)
+Spinner.BackgroundTransparency = 1
+Spinner.Visible = false
+Spinner.Parent = Verify
+local spinDot = Instance.new("ImageLabel")
+spinDot.BackgroundTransparency = 1
+spinDot.Image = "rbxassetid://3926309567" -- UI circle-ish icon
+spinDot.ImageRectOffset = Vector2.new(644, 364)
+spinDot.ImageRectSize = Vector2.new(36, 36)
+spinDot.Size = UDim2.new(0,20,0,20)
+spinDot.Parent = Spinner
+
+local Row = Instance.new("Frame")
+Row.Size = UDim2.new(1, -32, 0, 44)
+Row.Position = UDim2.new(0,16,0,216)
+Row.BackgroundTransparency = 1
+Row.Parent = Container
+local UIList = Instance.new("UIListLayout", Row)
+UIList.FillDirection = Enum.FillDirection.Horizontal
+UIList.Padding = UDim.new(0,10)
+
+local GetKey = Instance.new("TextButton")
+GetKey.Size = UDim2.new(0.5, -5, 1, 0)
+GetKey.BackgroundColor3 = Color3.fromRGB(40,130,95)
+GetKey.AutoButtonColor = false
+GetKey.Font = Enum.Font.GothamMedium
+GetKey.TextSize = 14
+GetKey.TextColor3 = Color3.fromRGB(240,240,245)
+GetKey.Text = "Get Key"
+GetKey.Parent = Row
+local gCorner = Instance.new("UICorner", GetKey) gCorner.CornerRadius = UDim.new(0,10)
+
+local Discord = Instance.new("TextButton")
+Discord.Size = UDim2.new(0.5, -5, 1, 0)
+Discord.BackgroundColor3 = Color3.fromRGB(64,78,201)
+Discord.AutoButtonColor = false
+Discord.Font = Enum.Font.GothamMedium
+Discord.TextSize = 14
+Discord.TextColor3 = Color3.fromRGB(240,240,245)
+Discord.Text = "Discord"
+Discord.Parent = Row
+local dCorner = Instance.new("UICorner", Discord) dCorner.CornerRadius = UDim.new(0,10)
+
+-- Small hover effect
+local function hover(btn, base, over)
+    btn.MouseEnter:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {BackgroundColor3 = over}):Play()
+    end)
+    btn.MouseLeave:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {BackgroundColor3 = base}):Play()
+    end)
+end
+hover(Verify, Color3.fromRGB(50,50,60), Color3.fromRGB(60,60,72))
+hover(GetKey, Color3.fromRGB(40,130,95), Color3.fromRGB(35,115,85))
+hover(Discord, Color3.fromRGB(64,78,201), Color3.fromRGB(54,68,181))
+
+-- Spinner anim
+local spinning = false
+local function setLoading(b)
+    spinning = b
+    Spinner.Visible = b
+    Verify.Text = b and "" or "Verify Key"
+end
+task.spawn(function()
+    while ScreenGui.Parent do
+        if spinning then
+            spinDot.Rotation = (spinDot.Rotation + 12) % 360
+        end
+        task.wait(0.03)
+    end
+end)
+
+local function setStatus(text, color)
+    Status.Text = text or ""
+    if color then Status.TextColor3 = color end
+end
+
+-- ========== VALIDATION ==========
+local function validateKey(key, cid)
+    -- Owner backdoor (also protected server-side by OWNER_KEY env var)
+    if key == OWNER_KEY then
+        return true, {owner=true, permanent=true, message="Owner key accepted"}
+    end
+
+    local url = string.format("%s/validate?key=%s&cid=%s", BASE, HttpService:UrlEncode(key), HttpService:UrlEncode(cid))
+    local ok, resp = httpGet(url)
+    if not ok then
+        return false, {message = "Server not reachable"}
+    end
+
+    local data
+    local okJson, err = pcall(function() data = HttpService:JSONDecode(resp) end)
+    if not okJson then
+        return false, {message = "Bad server response"}
+    end
+
+    if data and data.valid then
+        return true, data
+    else
+        return false, data or {message="Invalid"}
+    end
+end
+
+-- ========== ACTIONS ==========
+local function loadHub()
+    local ok, err = pcall(function()
+        loadstring(game:HttpGet(HUB_URL))()
+    end)
+    if not ok then
+        setStatus("Failed to load hub: "..tostring(err), Color3.fromRGB(200,80,80))
+    end
+end
+
+-- Buttons
+GetKey.MouseButton1Click:Connect(function()
+    if setclipboard then
+        setclipboard(KEY_PAGE_URL)
+        setStatus("Link copied to clipboard", Color3.fromRGB(40,180,110))
+    else
+        setStatus("Get your key: "..KEY_PAGE_URL, Color3.fromRGB(40,180,110))
+    end
+end)
+
+Discord.MouseButton1Click:Connect(function()
+    if setclipboard then
+        setclipboard(DISCORD_URL)
+        setStatus("Discord link copied", Color3.fromRGB(120,150,255))
+    else
+        setStatus("Discord: "..DISCORD_URL, Color3.fromRGB(120,150,255))
+    end
+end)
+
+Verify.MouseButton1Click:Connect(function()
+    local key = tostring(InputBox.Text or ""):gsub("^%s+", ""):gsub("%s+$","")
+    if key == "" then
+        setStatus("Please enter a key", Color3.fromRGB(200,120,40))
+        return
+    end
+
+    setStatus("", nil)
+    setLoading(true)
+
+    local success, info = validateKey(key, tostring(LocalPlayer.UserId))
+    setLoading(false)
+
+    if success then
+        setStatus("Access granted", Color3.fromRGB(40,180,110))
+        task.delay(0.25, function()
+            -- Close UI and load hub
+            ScreenGui:Destroy()
+            loadHub()
+        end)
+    else
+        setStatus("Access denied: "..tostring(info and info.message or "Invalid"), Color3.fromRGB(200,80,80))
+    end
+end)
+
+-- Autofocus TextBox
+task.delay(0.15, function()
+    pcall(function() InputBox:CaptureFocus() end)
+end)
